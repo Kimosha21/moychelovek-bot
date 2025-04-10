@@ -7,30 +7,63 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.getenv("BOT_TOKEN")
-API_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
-user_states = {}  # Хранение данных анкеты пользователя
+user_states = {}
 
 def send_message(chat_id, text):
-    requests.post(API_URL, json={
+    requests.post(f"{API_URL}/sendMessage", json={
         "chat_id": chat_id,
         "text": text
     })
 
+def send_profile(chat_id, profile):
+    text = (
+        f"Имя: {profile['name']}
+"
+        f"Пол: {profile['gender']}
+"
+        f"Возраст: {profile['age']}
+"
+        f"Город: {profile['city']}
+"
+        f"Цель: {profile['goal']}
+"
+        f"О себе: {profile['about']}"
+    )
+    send_message(chat_id, text)
+    # отправка фото
+    if "photo" in profile:
+        requests.post(f"{API_URL}/sendPhoto", json={
+            "chat_id": chat_id,
+            "photo": profile["photo"]
+        })
+
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     update = request.get_json()
+    if "message" in update:
+        message = update["message"]
+        chat_id = message["chat"]["id"]
 
-    if "message" in update and "text" in update["message"]:
-        chat_id = update["message"]["chat"]["id"]
-        text = update["message"]["text"]
+        if "text" in message:
+            text = message["text"]
+            if text == "/start":
+                user_states[chat_id] = {}
+                send_message(chat_id, "Привет! Давай создадим анкету. Как тебя зовут?")
+            else:
+                handle_user_response(chat_id, text)
 
-        if text == "/start":
-            user_states[chat_id] = {}
-            send_message(chat_id, "Привет! Давай создадим анкету.\nКак тебя зовут?")
-        else:
-            handle_user_response(chat_id, text)
-
+        elif "photo" in message:
+            file_id = message["photo"][-1]["file_id"]
+            state = user_states.get(chat_id, {})
+            if "photo" not in state:
+                state["photo"] = f"https://api.telegram.org/file/bot{TOKEN}/{file_id}"
+                user_states[chat_id] = state
+                send_message(chat_id, "Спасибо! Твоя анкета полностью создана:")
+                send_profile(chat_id, state)
+            else:
+                send_message(chat_id, "Фото уже добавлено.")
     return "OK"
 
 def handle_user_response(chat_id, text):
@@ -56,22 +89,14 @@ def handle_user_response(chat_id, text):
         send_message(chat_id, "Какая у тебя цель знакомства? (дружба, отношения, общение и т.д.)")
     elif "goal" not in state:
         state["goal"] = text
-        send_message(chat_id, "Спасибо! Твоя анкета создана.")
-        show_profile(chat_id, state)
+        send_message(chat_id, "Напиши немного о себе:")
+    elif "about" not in state:
+        state["about"] = text
+        send_message(chat_id, "Теперь отправь своё фото:")
     else:
         send_message(chat_id, "Анкета уже заполнена. Напиши /start, чтобы начать заново.")
 
     user_states[chat_id] = state
-
-def show_profile(chat_id, profile):
-    text = (
-        f"Имя: {profile['name']}\n"
-        f"Пол: {profile['gender']}\n"
-        f"Возраст: {profile['age']}\n"
-        f"Город: {profile['city']}\n"
-        f"Цель: {profile['goal']}"
-    )
-    send_message(chat_id, text)
 
 @app.route("/", methods=["GET"])
 def home():
