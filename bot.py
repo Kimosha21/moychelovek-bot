@@ -7,47 +7,15 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.getenv("BOT_TOKEN")
-API_URL = f"https://api.telegram.org/bot{TOKEN}"
+API_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
-# Пример анкет
-profiles = [
-    {"name": "Анна", "age": 23, "gender": "female"},
-    {"name": "Дима", "age": 25, "gender": "male"},
-    {"name": "Саша", "age": 23, "gender": "female"}
-]
-
-user_states = {}  # временное хранилище для пользователя
+user_states = {}  # Хранение данных анкеты пользователя
 
 def send_message(chat_id, text):
-    requests.post(f"{API_URL}/sendMessage", json={
+    requests.post(API_URL, json={
         "chat_id": chat_id,
         "text": text
     })
-
-def handle_filters(chat_id, text):
-    state = user_states.get(chat_id, {})
-
-    if "gender" not in state:
-        state["gender"] = text.lower()
-        user_states[chat_id] = state
-        send_message(chat_id, "Укажи возраст:")
-        return
-
-    if "age" not in state:
-        state["age"] = text
-        user_states[chat_id] = state
-
-        # Поиск совпадений
-        filters = state
-        matches = [p for p in profiles if
-                   p["gender"] == filters["gender"] and str(p["age"]) == str(filters["age"])]
-
-        if matches:
-            result = "\n".join([f"{p['name']}, {p['age']}, {p['gender']}" for p in matches])
-        else:
-            result = "Совпадений не найдено."
-
-        send_message(chat_id, result)
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
@@ -59,32 +27,51 @@ def webhook():
 
         if text == "/start":
             user_states[chat_id] = {}
-            send_message(chat_id, "Привет! Укажи пол (male/female):")
-
-        elif text.startswith("/find"):
-            # Пример: /find age=23 gender=female
-            criteria = {}
-            try:
-                parts = text.split()[1:]
-                for part in parts:
-                    key, value = part.split("=")
-                    criteria[key] = value
-
-                matches = [p for p in profiles if all(str(p.get(k)) == v for k, v in criteria.items())]
-
-                if matches:
-                    result = "\n".join([f"{p['name']}, {p['age']}, {p['gender']}" for p in matches])
-                else:
-                    result = "Совпадений не найдено."
-            except Exception:
-                result = "Неверный формат. Пример: /find age=23 gender=female"
-
-            send_message(chat_id, result)
-
+            send_message(chat_id, "Привет! Давай создадим анкету.\nКак тебя зовут?")
         else:
-            handle_filters(chat_id, text)
+            handle_user_response(chat_id, text)
 
     return "OK"
+
+def handle_user_response(chat_id, text):
+    state = user_states.get(chat_id, {})
+
+    if "name" not in state:
+        state["name"] = text
+        send_message(chat_id, "Укажи пол (мужской/женский):")
+    elif "gender" not in state:
+        if text.lower() not in ["мужской", "женский"]:
+            send_message(chat_id, "Пожалуйста, укажи 'мужской' или 'женский':")
+            return
+        state["gender"] = text.lower()
+        send_message(chat_id, "Сколько тебе лет?")
+    elif "age" not in state:
+        if not text.isdigit():
+            send_message(chat_id, "Укажи возраст числом:")
+            return
+        state["age"] = int(text)
+        send_message(chat_id, "Из какого ты города?")
+    elif "city" not in state:
+        state["city"] = text
+        send_message(chat_id, "Какая у тебя цель знакомства? (дружба, отношения, общение и т.д.)")
+    elif "goal" not in state:
+        state["goal"] = text
+        send_message(chat_id, "Спасибо! Твоя анкета создана.")
+        show_profile(chat_id, state)
+    else:
+        send_message(chat_id, "Анкета уже заполнена. Напиши /start, чтобы начать заново.")
+
+    user_states[chat_id] = state
+
+def show_profile(chat_id, profile):
+    text = (
+        f"Имя: {profile['name']}\n"
+        f"Пол: {profile['gender']}\n"
+        f"Возраст: {profile['age']}\n"
+        f"Город: {profile['city']}\n"
+        f"Цель: {profile['goal']}"
+    )
+    send_message(chat_id, text)
 
 @app.route("/", methods=["GET"])
 def home():
