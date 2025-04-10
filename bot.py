@@ -36,7 +36,20 @@ def send_profile(chat_id, profile):
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     update = request.get_json()
+if "callback_query" in update:
+    query = update["callback_query"]
+    chat_id = query["message"]["chat"]["id"]
+    data = query["data"]
 
+    if data == "start":
+        users[chat_id] = {"state": "name"}
+        send_message(chat_id, "Привет! Давай заполним анкету. Как тебя зовут?")
+    elif data == "edit":
+        users[chat_id] = {"state": "name"}
+        send_message(chat_id, "Давай отредактируем анкету. Введи своё имя:")
+    elif data == "search":
+        send_message(chat_id, "Скоро добавим поиск анкет. В разработке.")
+    return "OK"
     if "message" in update:
         message = update["message"]
         chat_id = message["chat"]["id"]
@@ -91,6 +104,19 @@ def webhook():
             }
             profiles.append(profile)
             send_message(chat_id, "Спасибо! Твоя анкета сохранена.")
+            keyboard = {
+    "inline_keyboard": [
+        [{"text": "🔍 Поиск анкет", "callback_data": "search"}],
+        [{"text": "✏️ Редактировать анкету", "callback_data": "edit"}],
+        [{"text": "🔁 Начать заново", "callback_data": "start"}]
+    ]
+}
+
+requests.post(API_URL + "/sendMessage", json={
+    "chat_id": chat_id,
+    "text": "Выбери действие:",
+    "reply_markup": keyboard
+})
 
     return "OK"
 
