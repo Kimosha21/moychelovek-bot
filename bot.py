@@ -118,7 +118,7 @@ requests.post(API_URL + "/sendMessage", json={
     "reply_markup": keyboard
 })
 
-    return "OK"
+     return "OK"
 
 @app.route("/", methods=["GET"])
 def home():
