@@ -73,7 +73,7 @@ def webhook():
         else:
             handle_filters(chat_id, text)
     return "OK" 
-elif text.startswith("/find"):
+if text.startswith("/find"):
     # Пример: /find age=23 gender=female
     criteria = {}
     try:
