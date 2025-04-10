@@ -67,12 +67,36 @@ def webhook():
         chat_id = update["message"]["chat"]["id"]
         text = update["message"]["text"]
 
-        if text == "/start":
+        if text == "/start": 
             user_states[chat_id] = {}
             send_message(chat_id, "Привет! Укажи пол (муж/жен):")
         else:
             handle_filters(chat_id, text)
-    return "OK"
+    return "OK" 
+elif text.startswith("/find"):
+    # Пример: /find age=23 gender=female
+    criteria = {}
+    try:
+        parts = text.split()[1:]  # Пропускаем "/find"
+        for part in parts:
+            key, value = part.split("=")
+            criteria[key] = value
+
+        # Поиск совпадений
+        matches = [p for p in profiles if all(str(p.get(k)) == v for k, v in criteria.items())]
+
+        if matches:
+            result = "\n".join([f"{p['name']}, {p['age']} лет, {p['gender']}" for p in matches])
+        else:
+            result = "Совпадений не найдено."
+
+    except Exception as e:
+        result = "Неверный формат. Пример: /find age=23 gender=female"
+
+    requests.post(API_URL + "sendMessage", json={
+        "chat_id": chat_id,
+        "text": result
+    })
 
 @app.route("/", methods=["GET"])
 def home():
