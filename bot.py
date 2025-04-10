@@ -1,13 +1,64 @@
+
 import os
 import logging
 from flask import Flask, request
 import requests
 
-TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
+
+TOKEN = os.getenv("BOT_TOKEN")
+API_URL = f"https://api.telegram.org/bot{TOKEN}"
+
+# Пример анкет
+profiles = [
+    {"name": "Анна", "age": 23, "gender": "жен", "city": "Москва", "about": "Люблю кино и кофе"},
+    {"name": "Дима", "age": 25, "gender": "муж", "city": "Сочи", "about": "Хожу в зал и путешествую"},
+    {"name": "Саша", "age": 23, "gender": "жен", "city": "Казань", "about": "Рисую и катаюсь на велике"},
+]
+
+user_states = {}  # временное хранилище для пользователей
+
+def send_message(chat_id, text):
+    requests.post(f"{API_URL}/sendMessage", json={
+        "chat_id": chat_id,
+        "text": text
+    })
+
+def handle_filters(chat_id, text):
+    state = user_states.get(chat_id, {})
+    
+    if "gender" not in state:
+        state["gender"] = text.lower()
+        user_states[chat_id] = state
+        send_message(chat_id, "Укажи возраст:")
+    elif "age" not in state:
+        try:
+            state["age"] = int(text)
+            user_states[chat_id] = state
+            send_message(chat_id, "Из какого ты города?")
+        except:
+            send_message(chat_id, "Пожалуйста, введи возраст цифрой:")
+    elif "city" not in state:
+        state["city"] = text
+        user_states[chat_id] = state
+        profile = find_match(state)
+        if profile:
+            send_message(chat_id, format_profile(profile))
+        else:
+            send_message(chat_id, "К сожалению, подходящих анкет не найдено.")
+        user_states.pop(chat_id)  # очистим данные
+
+def format_profile(profile):
+    return f"Имя: {profile['name']}\nВозраст: {profile['age']}\nГород: {profile['city']}\nО себе: {profile['about']}"
+
+def find_match(filters):
+    for profile in profiles:
+        if (profile["gender"] == filters["gender"]
+            and profile["age"] == filters["age"]
+            and profile["city"].lower() == filters["city"].lower()):
+            return profile
+    return None
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
@@ -17,10 +68,10 @@ def webhook():
         text = update["message"]["text"]
 
         if text == "/start":
-            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={
-                "chat_id": chat_id,
-                "text": "Привет! Я бот. Готов собирать анкету."
-            })
+            user_states[chat_id] = {}
+            send_message(chat_id, "Привет! Укажи пол (муж/жен):")
+        else:
+            handle_filters(chat_id, text)
     return "OK"
 
 @app.route("/", methods=["GET"])
