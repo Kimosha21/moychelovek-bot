@@ -19,7 +19,7 @@ def send_message(chat_id, text):
 
 def send_profile(chat_id, profile):
     text = (
-        f"Имя: {profile['name']}
+        f"Имя: {profile['name']}"
 "
         f"Пол: {profile['gender']}
 "
