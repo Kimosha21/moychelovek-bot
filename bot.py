@@ -72,7 +72,6 @@ def webhook():
             send_message(chat_id, "Привет! Укажи пол (муж/жен):")
         else:
             handle_filters(chat_id, text)
-    return "OK" 
 if text.startswith("/find"):
     # Пример: /find age=23 gender=female
     criteria = {}
