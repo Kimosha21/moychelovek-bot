@@ -188,3 +188,5 @@ def handle_like(chat_id):
 @app.route("/", methods=["GET"])
 def index():
     return "Bot is running"
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
