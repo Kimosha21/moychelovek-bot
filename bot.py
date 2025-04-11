@@ -8,20 +8,35 @@ app = Flask(__name__)
 TOKEN = "7559665369:AAEgac1ckHucHDKYr9zyiEcjnDMQGIkME8M"
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
-users = {}
-profiles = []
-likes = {}
+# Пути к JSON-файлам
+DATA_DIR = "data"
+os.makedirs(DATA_DIR, exist_ok=True)
+
+def load_json(filename, default):
+    path = os.path.join(DATA_DIR, filename)
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return default
+
+def save_json(filename, data):
+    path = os.path.join(DATA_DIR, filename)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+# Загрузка данных
+users = load_json("users.json", {})
+profiles = load_json("profiles.json", [])
+likes = load_json("likes.json", {})
+coins = load_json("coins.json", {})
+vip_list = load_json("vip.json", [])
+VIP_USERS = set(vip_list)
 daily_likes = {}
-coins = {}
-VIP_USERS = set()
-ADMIN_ID = 123456789  # замени на свой ID
+
+ADMIN_ID = 123456789  # замени на свой Telegram ID
 
 def send_message(chat_id, text, reply_markup=None):
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML"
-    }
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
     requests.post(f"{API_URL}/sendMessage", json=payload)
@@ -47,6 +62,7 @@ def webhook():
 
         if text == "/start":
             users[chat_id] = {"state": "name"}
+            save_json("users.json", users)
             send_message(chat_id, "Привет! Введи своё имя:")
             return "ok"
 
@@ -85,15 +101,22 @@ def webhook():
             user["photo_id"] = file_id
             user["state"] = "done"
             users[chat_id] = user
+            save_json("users.json", users)
+
             if chat_id not in profiles:
                 profiles.append(chat_id)
+                save_json("profiles.json", profiles)
+
             daily_likes.setdefault(chat_id, 10)
             coins.setdefault(chat_id, 0)
+            save_json("coins.json", coins)
+
             send_profile(chat_id, chat_id, own=True)
             show_main_menu(chat_id)
             return "ok"
 
         users[chat_id] = user
+        save_json("users.json", users)
 
     elif "callback_query" in update:
         query = update["callback_query"]
@@ -102,6 +125,7 @@ def webhook():
 
         if data == "start":
             users[chat_id] = {"state": "name"}
+            save_json("users.json", users)
             send_message(chat_id, "Анкета сброшена. Введи имя:")
 
         elif data == "profile":
@@ -114,6 +138,8 @@ def webhook():
             if coins.get(chat_id, 0) >= 5:
                 coins[chat_id] -= 5
                 VIP_USERS.add(chat_id)
+                save_json("coins.json", coins)
+                save_json("vip.json", list(VIP_USERS))
                 send_message(chat_id, "Поздравляем! Вы стали VIP пользователем.")
             else:
                 send_message(chat_id, "Недостаточно монет. Нужно 5 монет.")
@@ -123,6 +149,7 @@ def webhook():
 
         elif data == "edit":
             users[chat_id]["state"] = "name"
+            save_json("users.json", users)
             send_message(chat_id, "Редактирование анкеты. Введи имя:")
 
     return "ok"
@@ -178,9 +205,14 @@ def show_next_profile(chat_id):
                 send_message(chat_id, "У тебя закончились лайки на сегодня.")
                 return
             likes.setdefault(user_id, []).append(chat_id)
+            save_json("likes.json", likes)
+
             if chat_id not in VIP_USERS:
                 daily_likes[chat_id] -= 1
+
             coins[chat_id] = coins.get(chat_id, 0) + 1
+            save_json("coins.json", coins)
+
             send_profile(chat_id, user_id)
             return
     send_message(chat_id, "Анкеты не найдены.")
