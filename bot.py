@@ -15,6 +15,7 @@ likes = {}
 coins = {}
 vip_users = set()
 like_limits = {}
+search_filters = {}
 
 MAX_LIKES_PER_DAY = 10
 
@@ -37,8 +38,7 @@ def send_photo(chat_id, photo_path, caption=None, reply_markup=None):
             data["reply_markup"] = json.dumps(reply_markup)
         files = {"photo": photo}
         requests.post(f"{API_URL}/sendPhoto", data=data, files=files)
-
-@app.route(f"/{TOKEN}", methods=["POST"])
+        @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     update = request.get_json()
     reset_likes_daily()
@@ -81,6 +81,24 @@ def webhook():
                 users[chat_id]["about"] = text
                 users[chat_id]["state"] = "photo"
                 send_message(chat_id, "Отправь своё фото:")
+                            elif state == "filter_gender":
+                search_filters[chat_id] = {"gender": text}
+                users[chat_id]["state"] = "filter_age"
+                send_message(chat_id, "Укажи возрастной диапазон (например, 20-30):")
+            elif state == "filter_age":
+                try:
+                    min_age, max_age = map(int, text.split("-"))
+                    search_filters[chat_id]["min_age"] = min_age
+                    search_filters[chat_id]["max_age"] = max_age
+                    users[chat_id]["state"] = "filter_city"
+                    send_message(chat_id, "Укажи город (или напиши 'любой'):")
+                except:
+                    send_message(chat_id, "Неверный формат. Введи возраст как 20-30:")
+            elif state == "filter_city":
+                search_filters[chat_id]["city"] = text
+                users[chat_id]["state"] = "done"
+                show_profile(chat_id)
+
         elif "photo" in message and state == "photo":
             file_id = message["photo"][-1]["file_id"]
             file_info = requests.get(f"{API_URL}/getFile?file_id={file_id}").json()
@@ -114,8 +132,7 @@ def webhook():
             }
             send_message(chat_id, "Твоя анкета сохранена. Выбери действие:", reply_markup=keyboard)
             users[chat_id]["state"] = "done"
-
-    elif "callback_query" in update:
+                elif "callback_query" in update:
         query = update["callback_query"]
         chat_id = query["message"]["chat"]["id"]
         data = query["data"]
@@ -124,7 +141,8 @@ def webhook():
             users[chat_id] = {"state": "name"}
             send_message(chat_id, "Анкета сброшена. Введи имя:")
         elif data == "search":
-            show_profile(chat_id)
+            users[chat_id]["state"] = "filter_gender"
+            send_message(chat_id, "Кого ты хочешь найти? (мужской/женский)")
         elif data == "like":
             handle_like(chat_id)
         elif data == "edit":
@@ -141,21 +159,33 @@ def webhook():
     return "OK"
 
 def show_profile(chat_id):
+    f = search_filters.get(chat_id, {})
     for profile in profiles:
-        if profile["chat_id"] != chat_id:
-            caption = f"Имя: {profile['name']}\nПол: {profile['gender']}\nВозраст: {profile['age']}\nГород: {profile['city']}\nЦель: {profile['goal']}\nО себе: {profile['about']}"
-            if profile["chat_id"] in vip_users:
-                caption = "💎 VIP\n" + caption
-            keyboard = {
-                "inline_keyboard": [
-                    [{"text": "❤️ Лайк", "callback_data": "like"}],
-                    [{"text": "🔍 Следующий", "callback_data": "search"}]
-                ]
-            }
-            send_photo(chat_id, profile["photo_path"], caption, reply_markup=keyboard)
-            return
-    send_message(chat_id, "Анкеты не найдены.")
-
+        if profile["chat_id"] == chat_id:
+            continue
+        if f:
+            if f["gender"].lower() != profile["gender"].lower():
+                continue
+            try:
+                age = int(profile["age"])
+                if not (f["min_age"] <= age <= f["max_age"]):
+                    continue
+            except:
+                continue
+            if f["city"].lower() != "любой" and f["city"].lower() != profile["city"].lower():
+                continue
+        caption = f"Имя: {profile['name']}\nПол: {profile['gender']}\nВозраст: {profile['age']}\nГород: {profile['city']}\nЦель: {profile['goal']}\nО себе: {profile['about']}"
+        if profile["chat_id"] in vip_users:
+            caption = "💎 VIP\n" + caption
+        keyboard = {
+            "inline_keyboard": [
+                [{"text": "❤️ Лайк", "callback_data": "like"}],
+                [{"text": "🔍 Следующий", "callback_data": "search"}]
+            ]
+        }
+        send_photo(chat_id, profile["photo_path"], caption, reply_markup=keyboard)
+        return
+    send_message(chat_id, "Нет анкет по твоим фильтрам.")
 def handle_like(chat_id):
     if chat_id in vip_users:
         send_message(chat_id, "Лайк засчитан! (VIP)")
@@ -163,9 +193,9 @@ def handle_like(chat_id):
         likes[chat_id] = likes.get(chat_id, 0) + 1
         remaining = MAX_LIKES_PER_DAY - likes[chat_id]
         if likes[chat_id] > MAX_LIKES_PER_DAY:
-            send_message(chat_id, "Лимит лайков на сегодня исчерпан. Купи VIP или подожди завтра.")
+            send_message(chat_id, "Лимит лайков исчерпан. Купи VIP или подожди до завтра.")
             return
-        send_message(chat_id, f"Ты поставил лайк! Осталось {remaining} из {MAX_LIKES_PER_DAY} на сегодня.")
+        send_message(chat_id, f"Ты поставил лайк! Осталось {remaining} из {MAX_LIKES_PER_DAY}.")
     show_profile(chat_id)
 
 @app.route("/", methods=["GET"])
