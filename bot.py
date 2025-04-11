@@ -1,19 +1,20 @@
 import os
 import json
-from flask import Flask, request
 import requests
+from flask import Flask, request
 
 app = Flask(__name__)
 
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = "7559665369:AAEgac1ckHucHDKYr9zyiEcjnDMQGIkME8M"
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 users = {}
 profiles = []
 likes = {}
 daily_likes = {}
+coins = {}
 VIP_USERS = set()
-ADMIN_ID = 123456789  # замените на ваш Telegram ID
+ADMIN_ID = 123456789  # замени на свой ID
 
 def send_message(chat_id, text, reply_markup=None):
     payload = {
@@ -84,8 +85,10 @@ def webhook():
             user["photo_id"] = file_id
             user["state"] = "done"
             users[chat_id] = user
-            profiles.append(chat_id)
+            if chat_id not in profiles:
+                profiles.append(chat_id)
             daily_likes.setdefault(chat_id, 10)
+            coins.setdefault(chat_id, 0)
             send_profile(chat_id, chat_id, own=True)
             show_main_menu(chat_id)
             return "ok"
@@ -99,16 +102,28 @@ def webhook():
 
         if data == "start":
             users[chat_id] = {"state": "name"}
-            send_message(chat_id, "Давай начнем заново! Введи своё имя:")
+            send_message(chat_id, "Анкета сброшена. Введи имя:")
+
         elif data == "profile":
             send_profile(chat_id, chat_id, own=True)
+
         elif data == "like":
             show_next_profile(chat_id)
+
         elif data == "vip":
-            VIP_USERS.add(chat_id)
-            send_message(chat_id, "Теперь ты VIP! Лайков без ограничений.")
-        elif data == "stats" and chat_id == ADMIN_ID:
-            send_message(chat_id, f"Пользователей: {len(profiles)}")
+            if coins.get(chat_id, 0) >= 5:
+                coins[chat_id] -= 5
+                VIP_USERS.add(chat_id)
+                send_message(chat_id, "Поздравляем! Вы стали VIP пользователем.")
+            else:
+                send_message(chat_id, "Недостаточно монет. Нужно 5 монет.")
+
+        elif data == "search":
+            show_next_profile(chat_id)
+
+        elif data == "edit":
+            users[chat_id]["state"] = "name"
+            send_message(chat_id, "Редактирование анкеты. Введи имя:")
 
     return "ok"
 
@@ -128,16 +143,23 @@ def send_profile(to_chat_id, user_id, own=False):
     keyboard = {"inline_keyboard": []}
     if own:
         keyboard["inline_keyboard"].append([
-            {"text": "🔁 Начать заново", "callback_data": "start"},
-            {"text": "🧾 Моя анкета", "callback_data": "profile"},
-            {"text": "⭐ VIP", "callback_data": "vip"}
+            {"text": "🔍 Поиск анкет", "callback_data": "search"}
+        ])
+        keyboard["inline_keyboard"].append([
+            {"text": "✏️ Редактировать анкету", "callback_data": "edit"}
+        ])
+        keyboard["inline_keyboard"].append([
+            {"text": "♻️ Начать заново", "callback_data": "start"}
+        ])
+        keyboard["inline_keyboard"].append([
+            {"text": "⭐ Купить VIP (5 монет)", "callback_data": "vip"}
         ])
     else:
         keyboard["inline_keyboard"].append([
             {"text": "❤️ Лайк", "callback_data": "like"}
         ])
 
-    requests.post(API_URL + "/sendPhoto", json={
+    requests.post(f"{API_URL}/sendPhoto", json={
         "chat_id": to_chat_id,
         "photo": user["photo_id"],
         "caption": caption,
@@ -158,19 +180,21 @@ def show_next_profile(chat_id):
             likes.setdefault(user_id, []).append(chat_id)
             if chat_id not in VIP_USERS:
                 daily_likes[chat_id] -= 1
+            coins[chat_id] = coins.get(chat_id, 0) + 1
             send_profile(chat_id, user_id)
             return
-    send_message(chat_id, "Пока нет новых анкет. Попробуй позже.")
+    send_message(chat_id, "Анкеты не найдены.")
 
 def show_main_menu(chat_id):
     keyboard = {
         "inline_keyboard": [
-            [{"text": "🔁 Начать заново", "callback_data": "start"}],
-            [{"text": "🧾 Моя анкета", "callback_data": "profile"}],
-            [{"text": "⭐ VIP", "callback_data": "vip"}]
+            [{"text": "🔍 Поиск анкет", "callback_data": "search"}],
+            [{"text": "✏️ Редактировать анкету", "callback_data": "edit"}],
+            [{"text": "♻️ Начать заново", "callback_data": "start"}],
+            [{"text": "⭐ Купить VIP (5 монет)", "callback_data": "vip"}]
         ]
     }
-    send_message(chat_id, "Выбери действие:", reply_markup=keyboard)
+    send_message(chat_id, "Твоя анкета сохранена. Выбери действие:", reply_markup=keyboard)
 
 @app.route("/", methods=["GET"])
 def home():
