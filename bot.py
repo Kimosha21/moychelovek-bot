@@ -9,7 +9,6 @@ app = Flask(__name__)
 TOKEN = "7559665369:AAEgac1ckHucHDKYr9zyiEcjnDMQGIkME8M"
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
 CHANNEL_USERNAME = "moychelovek61"
-BOT_USERNAME = "moychelovek_bot"
 DATA_DIR = "data"
 
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -55,7 +54,8 @@ def reset_likes_if_needed():
 def check_gender_match(user_gender, profile_gender):
     return (user_gender == "мужской" and profile_gender == "женский") or \
            (user_gender == "женский" and profile_gender == "мужской")
-    @app.route(f"/{TOKEN}", methods=["POST"])
+
+@app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     reset_likes_if_needed()
     update = request.get_json()
@@ -78,8 +78,7 @@ def webhook():
                 coins.setdefault(int(ref_id), 0)
                 coins[int(ref_id)] += 3
                 referrals[str(chat_id)] = ref_id
-                save_json("coins.json", coins)
-                save_json("referrals.json", referrals)
+                save_all()
 
         if text == "/start":
             users[chat_id] = {"state": "name"}
@@ -144,8 +143,7 @@ def webhook():
             if coins.get(chat_id, 0) >= 5:
                 coins[chat_id] -= 5
                 VIP_USERS.add(chat_id)
-                save_json("coins.json", coins)
-                save_json("vip.json", list(VIP_USERS))
+                save_all()
                 send_message(chat_id, "Поздравляем! Вы стали VIP.")
             else:
                 send_message(chat_id, "Недостаточно монет (нужно 5).")
@@ -180,7 +178,6 @@ def show_next_profile(chat_id):
         save_all()
         send_profile(chat_id, user_id)
 
-        # Уведомление о взаимной симпатии
         if chat_id in likes.get(user_id, []):
             send_message(chat_id, "У вас взаимная симпатия!")
             send_message(user_id, "У вас взаимная симпатия!")
