@@ -7,24 +7,19 @@ app = Flask(__name__)
 
 TOKEN = "7559665369:AAEgac1ckHucHDKYr9zyiEcjnDMQGIkME8M"
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
-
-# Пути к JSON-файлам
 DATA_DIR = "data"
+
 os.makedirs(DATA_DIR, exist_ok=True)
 
 def load_json(filename, default):
     path = os.path.join(DATA_DIR, filename)
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return default
+    return json.load(open(path, "r", encoding="utf-8")) if os.path.exists(path) else default
 
 def save_json(filename, data):
     path = os.path.join(DATA_DIR, filename)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# Загрузка данных
 users = load_json("users.json", {})
 profiles = load_json("profiles.json", [])
 likes = load_json("likes.json", {})
@@ -42,21 +37,17 @@ def send_message(chat_id, text, reply_markup=None):
     requests.post(f"{API_URL}/sendMessage", json=payload)
 
 def check_gender_match(user_gender, profile_gender):
-    user_gender = user_gender.lower()
-    profile_gender = profile_gender.lower()
     return (user_gender == "мужской" and profile_gender == "женский") or \
            (user_gender == "женский" and profile_gender == "мужской")
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     update = request.get_json()
-
     if "message" in update:
         message = update["message"]
         chat_id = message["chat"]["id"]
         text = message.get("text", "")
         photo = message.get("photo")
-
         user = users.get(chat_id, {"state": "start"})
         state = user["state"]
 
@@ -70,32 +61,26 @@ def webhook():
             user["name"] = text
             user["state"] = "gender"
             send_message(chat_id, "Укажи свой пол (мужской/женский):")
-
         elif state == "gender":
-            user["gender"] = text
+            user["gender"] = text.lower()
             user["state"] = "age"
             send_message(chat_id, "Сколько тебе лет?")
-
         elif state == "age":
             user["age"] = text
             user["state"] = "city"
             send_message(chat_id, "Из какого ты города?")
-
         elif state == "city":
             user["city"] = text
             user["state"] = "goal"
             send_message(chat_id, "Какова цель знакомства?")
-
         elif state == "goal":
             user["goal"] = text
             user["state"] = "about"
             send_message(chat_id, "Расскажи немного о себе:")
-
         elif state == "about":
             user["about"] = text
             user["state"] = "photo"
             send_message(chat_id, "Отправь своё фото:")
-
         elif state == "photo" and photo:
             file_id = photo[-1]["file_id"]
             user["photo_id"] = file_id
@@ -127,26 +112,21 @@ def webhook():
             users[chat_id] = {"state": "name"}
             save_json("users.json", users)
             send_message(chat_id, "Анкета сброшена. Введи имя:")
-
         elif data == "profile":
             send_profile(chat_id, chat_id, own=True)
-
         elif data == "like":
             show_next_profile(chat_id)
-
         elif data == "vip":
             if coins.get(chat_id, 0) >= 5:
                 coins[chat_id] -= 5
                 VIP_USERS.add(chat_id)
                 save_json("coins.json", coins)
                 save_json("vip.json", list(VIP_USERS))
-                send_message(chat_id, "Поздравляем! Вы стали VIP пользователем.")
+                send_message(chat_id, "Вы получили VIP. Теперь лайки без ограничений!")
             else:
-                send_message(chat_id, "Недостаточно монет. Нужно 5 монет.")
-
+                send_message(chat_id, "Недостаточно монет. Нужно 5.")
         elif data == "search":
             show_next_profile(chat_id)
-
         elif data == "edit":
             users[chat_id]["state"] = "name"
             save_json("users.json", users)
@@ -170,15 +150,9 @@ def send_profile(to_chat_id, user_id, own=False):
     keyboard = {"inline_keyboard": []}
     if own:
         keyboard["inline_keyboard"].append([
-            {"text": "🔍 Поиск анкет", "callback_data": "search"}
-        ])
-        keyboard["inline_keyboard"].append([
-            {"text": "✏️ Редактировать анкету", "callback_data": "edit"}
-        ])
-        keyboard["inline_keyboard"].append([
-            {"text": "♻️ Начать заново", "callback_data": "start"}
-        ])
-        keyboard["inline_keyboard"].append([
+            {"text": "🔍 Поиск анкет", "callback_data": "search"},
+            {"text": "✏️ Редактировать анкету", "callback_data": "edit"},
+            {"text": "♻️ Начать заново", "callback_data": "start"},
             {"text": "⭐ Купить VIP (5 монет)", "callback_data": "vip"}
         ])
     else:
@@ -215,7 +189,7 @@ def show_next_profile(chat_id):
 
             send_profile(chat_id, user_id)
             return
-    send_message(chat_id, "Анкеты не найдены.")
+    send_message(chat_id, "Анкет больше нет, попробуй позже.")
 
 def show_main_menu(chat_id):
     keyboard = {
