@@ -1,3 +1,4 @@
+
 import os
 import logging
 from flask import Flask, request
@@ -25,6 +26,39 @@ def send_message(chat_id, text, reply_markup=None):
 def webhook():
     update = request.get_json()
 
+    # Обработка кнопок (callback_query)
+    if "callback_query" in update:
+        query = update["callback_query"]
+        chat_id = query["message"]["chat"]["id"]
+        data = query["data"]
+
+        if data == "start":
+            users[chat_id] = {"state": "name"}
+            send_message(chat_id, "Начнём заново. Как тебя зовут?")
+        elif data == "edit":
+            users[chat_id] = {"state": "name"}
+            send_message(chat_id, "Редактируем анкету. Введи имя:")
+        elif data == "search":
+            found = False
+            for profile in profiles:
+                if profile["chat_id"] != chat_id:
+                    text = f"Имя: {profile['name']}
+Пол: {profile['gender']}
+Возраст: {profile['age']}
+Город: {profile['city']}
+Цель: {profile['goal']}
+О себе: {profile['about']}"
+                    requests.post(f"{API_URL}/sendPhoto", json={
+                        "chat_id": chat_id,
+                        "photo": profile["photo"],  # используем file_id
+                        "caption": text
+                    })
+                    found = True
+                    break
+            if not found:
+                send_message(chat_id, "Пока нет анкет для показа.")
+        return "OK"
+
     if "message" in update:
         message = update["message"]
         chat_id = message["chat"]["id"]
@@ -43,35 +77,30 @@ def webhook():
                 users[chat_id]["state"] = "gender"
                 send_message(chat_id, "Укажи пол (мужской/женский):")
                 return "OK"
-
-            if state == "gender":
+            elif state == "gender":
                 users[chat_id]["gender"] = text
                 users[chat_id]["state"] = "age"
-                send_message(chat_id, "Укажи возраст:")
+                send_message(chat_id, "Сколько тебе лет?")
                 return "OK"
-
-            if state == "age":
+            elif state == "age":
                 users[chat_id]["age"] = text
                 users[chat_id]["state"] = "city"
-                send_message(chat_id, "Укажи город:")
+                send_message(chat_id, "Из какого ты города?")
                 return "OK"
-
-            if state == "city":
+            elif state == "city":
                 users[chat_id]["city"] = text
                 users[chat_id]["state"] = "goal"
-                send_message(chat_id, "Какова цель знакомства?")
+                send_message(chat_id, "Какая цель знакомства?")
                 return "OK"
-
-            if state == "goal":
+            elif state == "goal":
                 users[chat_id]["goal"] = text
                 users[chat_id]["state"] = "about"
-                send_message(chat_id, "Расскажи немного о себе:")
+                send_message(chat_id, "Напиши немного о себе:")
                 return "OK"
-
-            if state == "about":
+            elif state == "about":
                 users[chat_id]["about"] = text
                 users[chat_id]["state"] = "photo"
-                send_message(chat_id, "Теперь отправь свою фотографию:")
+                send_message(chat_id, "Отправь своё фото:")
                 return "OK"
 
         if "photo" in message:
@@ -79,6 +108,7 @@ def webhook():
             users[chat_id]["photo"] = file_id
 
             profile = {
+                "chat_id": chat_id,
                 "name": users[chat_id]["name"],
                 "gender": users[chat_id]["gender"],
                 "age": users[chat_id]["age"],
@@ -95,7 +125,7 @@ def webhook():
                 "inline_keyboard": [
                     [{"text": "🔍 Поиск анкет", "callback_data": "search"}],
                     [{"text": "✏️ Редактировать анкету", "callback_data": "edit"}],
-                    [{"text": "♻️ Начать заново", "callback_data": "restart"}]
+                    [{"text": "♻️ Начать заново", "callback_data": "start"}]
                 ]
             }
 
@@ -107,7 +137,7 @@ def webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Bot is running"
+    return "Бот работает!"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
