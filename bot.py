@@ -1,178 +1,192 @@
 import os
 import json
-import logging
-from flask import Flask, request
 import requests
+from flask import Flask, request
 
 app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
 
-TOKEN = os.getenv("BOT_TOKEN")
-API_URL = f"https://api.telegram.org/bot{TOKEN}"
-
-DATA_DIR = "data"
-PROFILE_FILE = os.path.join(DATA_DIR, "profiles.json")
-LIKES_FILE = os.path.join(DATA_DIR, "likes.json")
-COINS_FILE = os.path.join(DATA_DIR, "coins.json")
-VIP_FILE = os.path.join(DATA_DIR, "vip_users.json")
-
-# Загрузка данных
-def load_json(filename, default):
-    if os.path.exists(filename):
-        with open(filename, "r") as f:
-            return json.load(f)
-    return default
-
-def save_json(filename, data):
-    with open(filename, "w") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
+TOKEN = os.getenv("TOKEN")
+API_URL = f"https://api.telegram.org/bot{TOKEN}/"
 users = {}
-profiles = load_json(PROFILE_FILE, [])
-likes = load_json(LIKES_FILE, {})
-coins = load_json(COINS_FILE, {})
-vip_users = set(load_json(VIP_FILE, []))
+profiles = []
+likes = {}
+coins = {}
+vip_users = set()
 
 def send_message(chat_id, text, reply_markup=None):
-    payload = {"chat_id": chat_id, "text": text}
+    data = {
+        "chat_id": chat_id,
+        "text": text
+    }
     if reply_markup:
-        payload["reply_markup"] = reply_markup
-    requests.post(f"{API_URL}/sendMessage", json=payload)
+        data["reply_markup"] = json.dumps(reply_markup)
+    requests.post(API_URL + "sendMessage", json=data)
+
+def send_photo(chat_id, photo_path, caption=None, reply_markup=None):
+    url = API_URL + "sendPhoto"
+    with open(photo_path, "rb") as photo:
+        files = {"photo": photo}
+        data = {"chat_id": chat_id}
+        if caption:
+            data["caption"] = caption
+        if reply_markup:
+            data["reply_markup"] = json.dumps(reply_markup)
+        requests.post(url, data=data, files=files)
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
-    global profiles, likes, coins, vip_users
     update = request.get_json()
 
     if "message" in update:
         message = update["message"]
-        chat_id = str(message["chat"]["id"])
+        chat_id = message["chat"]["id"]
         text = message.get("text", "")
         photo = message.get("photo")
-
-        if text == "/vip":
-            balance = coins.get(chat_id, 0)
-            if chat_id in vip_users:
-                send_message(chat_id, "У тебя уже есть VIP-доступ!")
-            elif balance >= 20:
-                coins[chat_id] -= 20
-                vip_users.add(chat_id)
-                send_message(chat_id, "Поздравляем! Теперь у тебя VIP-доступ!")
-                save_json(COINS_FILE, coins)
-                save_json(VIP_FILE, list(vip_users))
-            else:
-                send_message(chat_id, f"Недостаточно монет. У тебя {balance}, нужно 20.")
-            return "OK"
-
-        user = users.get(chat_id, {"step": "name"})
-        step = user["step"]
+        state = users.get(chat_id, {}).get("state")
 
         if text == "/start":
-            users[chat_id] = {"step": "name", "likes_today": 0}
+            users[chat_id] = {"state": "name"}
             send_message(chat_id, "Привет! Как тебя зовут?")
-        elif step == "name":
-            user["name"] = text
-            user["step"] = "gender"
+            return "OK"
+
+        if state == "name":
+            users[chat_id]["name"] = text
+            users[chat_id]["state"] = "gender"
             send_message(chat_id, "Укажи пол (мужской/женский):")
-        elif step == "gender":
-            user["gender"] = text
-            user["step"] = "age"
+        elif state == "gender":
+            users[chat_id]["gender"] = text
+            users[chat_id]["state"] = "age"
             send_message(chat_id, "Сколько тебе лет?")
-        elif step == "age":
-            user["age"] = text
-            user["step"] = "city"
+        elif state == "age":
+            users[chat_id]["age"] = text
+            users[chat_id]["state"] = "city"
             send_message(chat_id, "Из какого ты города?")
-        elif step == "city":
-            user["city"] = text
-            user["step"] = "goal"
+        elif state == "city":
+            users[chat_id]["city"] = text
+            users[chat_id]["state"] = "goal"
             send_message(chat_id, "Какова цель знакомства?")
-        elif step == "goal":
-            user["goal"] = text
-            user["step"] = "about"
+        elif state == "goal":
+            users[chat_id]["goal"] = text
+            users[chat_id]["state"] = "about"
             send_message(chat_id, "Расскажи немного о себе:")
-        elif step == "about":
-            user["about"] = text
-            user["step"] = "photo"
+        elif state == "about":
+            users[chat_id]["about"] = text
+            users[chat_id]["state"] = "photo"
             send_message(chat_id, "Отправь своё фото:")
-        elif step == "photo" and photo:
-            photo_id = photo[-1]["file_id"]
+        elif state == "photo" and photo:
+            file_id = photo[-1]["file_id"]
+            file_path = f"{chat_id}.jpg"
+            file_info = requests.get(API_URL + f"getFile?file_id={file_id}").json()
+            file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info['result']['file_path']}"
+            img_data = requests.get(file_url).content
+            with open(file_path, "wb") as f:
+                f.write(img_data)
+
             profile = {
-                "id": chat_id,
-                "name": user["name"],
-                "gender": user["gender"],
-                "age": user["age"],
-                "city": user["city"],
-                "goal": user["goal"],
-                "about": user["about"],
-                "photo": photo_id
+                "chat_id": chat_id,
+                "name": users[chat_id]["name"],
+                "gender": users[chat_id]["gender"],
+                "age": users[chat_id]["age"],
+                "city": users[chat_id]["city"],
+                "goal": users[chat_id]["goal"],
+                "about": users[chat_id]["about"],
+                "photo_path": file_path
             }
             profiles.append(profile)
-            coins[chat_id] = coins.get(chat_id, 5)
-            user["step"] = "done"
-            save_json(PROFILE_FILE, profiles)
-            save_json(COINS_FILE, coins)
-            keyboard = {
-                "inline_keyboard": [
-                    [{"text": "🔍 Поиск анкет", "callback_data": "search"}],
-                    [{"text": "✏️ Редактировать анкету", "callback_data": "edit"}],
-                    [{"text": "♻️ Начать заново", "callback_data": "restart"}]
-                ]
-            }
-            send_message(chat_id, "Анкета сохранена! Выбери действие:", reply_markup=keyboard)
+            coins[chat_id] = 10
 
-        users[chat_id] = user
+            send_message(chat_id, "Спасибо! Твоя анкета сохранена.")
+            show_menu(chat_id)
+        elif text == "Моя анкета":
+            show_profile(chat_id)
+        return "OK"
 
-    elif "callback_query" in update:
+    if "callback_query" in update:
         query = update["callback_query"]
+        chat_id = query["message"]["chat"]["id"]
         data = query["data"]
-        chat_id = str(query["from"]["id"])
-        user = users.get(chat_id, {"likes_today": 0})
 
-        if data == "restart" or data == "edit":
-            users[chat_id] = {"step": "name", "likes_today": 0}
-            send_message(chat_id, "Начнём заново. Как тебя зовут?")
-        elif data == "search":
-            for p in profiles:
-                if p["id"] != chat_id:
-                    caption = (
-                        f"Имя: {p['name']}\n"
-                        f"Возраст: {p['age']}\n"
-                        f"Город: {p['city']}\n"
-                        f"О себе: {p['about']}"
-                    )
-                    if p["id"] in vip_users:
-                        caption += "\n[VIP]"
-                    keyboard = {
-                        "inline_keyboard": [
-                            [{"text": "❤️", "callback_data": f"like_{p['id']}"}],
-                            [{"text": "⏭", "callback_data": "search"}]
-                        ]
-                    }
-                    requests.post(f"{API_URL}/sendPhoto", json={
-                        "chat_id": chat_id,
-                        "photo": p["photo"],
-                        "caption": caption,
-                        "reply_markup": keyboard
-                    })
-                    break
-        elif data.startswith("like_"):
-            liked_id = data.split("_")[1]
-            is_vip = chat_id in vip_users
-            user_likes = user.get("likes_today", 0)
-
-            if not is_vip and user_likes >= 5:
-                send_message(chat_id, "Вы израсходовали лимит лайков на сегодня. Купите VIP или подождите до завтра.")
-                return "OK"
-
-            likes.setdefault(liked_id, []).append(chat_id)
-            users[chat_id]["likes_today"] = user_likes + 1
-            save_json(LIKES_FILE, likes)
-            send_message(chat_id, "Лайк отправлен!")
+        if data == "menu":
+            show_menu(chat_id)
+        elif data == "view":
+            show_random_profile(chat_id)
+        elif data == "like":
+            handle_like(chat_id)
+        elif data == "skip":
+            show_random_profile(chat_id)
+        elif data == "vip":
+            if coins.get(chat_id, 0) >= 5:
+                coins[chat_id] -= 5
+                vip_users.add(chat_id)
+                send_message(chat_id, "Теперь ты VIP!")
+            else:
+                send_message(chat_id, "Недостаточно монет.")
+        return "OK"
 
     return "OK"
 
+def show_menu(chat_id):
+    keyboard = {
+        "inline_keyboard": [
+            [{"text": "Моя анкета", "callback_data": "menu"}],
+            [{"text": "Поиск анкет", "callback_data": "view"}],
+            [{"text": "Получить VIP (5 монет)", "callback_data": "vip"}]
+        ]
+    }
+    send_message(chat_id, "Выбери действие:", reply_markup=keyboard)
+
+def show_profile(chat_id):
+    for profile in profiles:
+        if profile["chat_id"] == chat_id:
+            caption = (
+                f"Имя: {profile['name']}\n"
+                f"Пол: {profile['gender']}\n"
+                f"Возраст: {profile['age']}\n"
+                f"Город: {profile['city']}\n"
+                f"Цель: {profile['goal']}\n"
+                f"О себе: {profile['about']}\n"
+                f"VIP: {'Да' if chat_id in vip_users else 'Нет'}\n"
+                f"Монеты: {coins.get(chat_id, 0)}"
+            )
+            send_photo(chat_id, profile["photo_path"], caption=caption)
+            return
+
+def show_random_profile(chat_id):
+    for profile in profiles:
+        if profile["chat_id"] != chat_id:
+            caption = (
+                f"Имя: {profile['name']}\n"
+                f"Пол: {profile['gender']}\n"
+                f"Возраст: {profile['age']}\n"
+                f"Город: {profile['city']}\n"
+                f"Цель: {profile['goal']}\n"
+                f"О себе: {profile['about']}"
+            )
+            keyboard = {
+                "inline_keyboard": [
+                    [{"text": "❤️ Лайк", "callback_data": "like"}],
+                    [{"text": "⏭ Пропустить", "callback_data": "skip"}]
+                ]
+            }
+            users[chat_id]["current"] = profile["chat_id"]
+            send_photo(chat_id, profile["photo_path"], caption=caption, reply_markup=keyboard)
+            return
+    send_message(chat_id, "Пока нет анкет для показа.")
+
+def handle_like(chat_id):
+    target_id = users.get(chat_id, {}).get("current")
+    if not target_id:
+        send_message(chat_id, "Ошибка. Попробуй ещё раз.")
+        return
+    if target_id in likes and chat_id in likes[target_id]:
+        send_message(chat_id, "У вас взаимная симпатия!")
+        send_message(target_id, "У вас взаимная симпатия!")
+    likes.setdefault(chat_id, []).append(target_id)
+    coins[chat_id] = coins.get(chat_id, 0) - 1
+    show_random_profile(chat_id)
+
 @app.route("/", methods=["GET"])
-def index():
+def home():
     return "Bot is running"
 
 if __name__ == "__main__":
