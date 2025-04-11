@@ -1,6 +1,6 @@
 import os
+import json
 import logging
-import sqlite3
 from flask import Flask, request
 import requests
 
@@ -9,35 +9,20 @@ logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.getenv("BOT_TOKEN")
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
-DATABASE = "database.db"
+ADMIN_ID = os.getenv("ADMIN_ID", "123456789")
 
-def init_db():
-    conn = sqlite3.connect(DATABASE)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS profiles (
-        chat_id INTEGER PRIMARY KEY,
-        name TEXT,
-        gender TEXT,
-        age INTEGER,
-        city TEXT,
-        goal TEXT,
-        about TEXT,
-        photo_path TEXT,
-        is_vip INTEGER DEFAULT 0,
-        coins INTEGER DEFAULT 10
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS likes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        from_user INTEGER,
-        to_user INTEGER,
-        UNIQUE(from_user, to_user)
-    )''')
-    conn.commit()
-    conn.close()
+DATA_FILE = "data.json"
+if not os.path.exists(DATA_FILE):
+    with open(DATA_FILE, "w") as f:
+        json.dump({"users": {}, "profiles": [], "likes": {}, "vip": [], "coins": {}}, f)
 
-init_db()
+def load_data():
+    with open(DATA_FILE, "r") as f:
+        return json.load(f)
 
-users = {}
+def save_data(data):
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 def send_message(chat_id, text, reply_markup=None):
     payload = {
@@ -51,119 +36,138 @@ def send_message(chat_id, text, reply_markup=None):
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     update = request.get_json()
+    data = load_data()
+
     if "message" in update:
         message = update["message"]
-        chat_id = message["chat"]["id"]
-        state = users.get(chat_id, {}).get("state")
+        chat_id = str(message["chat"]["id"])
+        text = message.get("text", "")
+        photo = message.get("photo")
 
-        if "text" in message:
-            text = message["text"]
-
-            if text == "/start":
-                users[chat_id] = {"state": "name"}
-                send_message(chat_id, "Привет! Как тебя зовут?")
-                return "OK"
-
-            if state == "name":
-                users[chat_id]["name"] = text
-                users[chat_id]["state"] = "gender"
-                send_message(chat_id, "Укажи пол (мужской/женский):")
-                return "OK"
-
-            if state == "gender":
-                users[chat_id]["gender"] = text
-                users[chat_id]["state"] = "age"
-                send_message(chat_id, "Сколько тебе лет?")
-                return "OK"
-
-            if state == "age":
-                users[chat_id]["age"] = text
-                users[chat_id]["state"] = "city"
-                send_message(chat_id, "Из какого ты города?")
-                return "OK"
-
-            if state == "city":
-                users[chat_id]["city"] = text
-                users[chat_id]["state"] = "goal"
-                send_message(chat_id, "Какова цель знакомства?")
-                return "OK"
-
-            if state == "goal":
-                users[chat_id]["goal"] = text
-                users[chat_id]["state"] = "about"
-                send_message(chat_id, "Расскажи немного о себе:")
-                return "OK"
-
-            if state == "about":
-                users[chat_id]["about"] = text
-                users[chat_id]["state"] = "photo"
-                send_message(chat_id, "Теперь отправь свою фотографию:")
-                return "OK"
-
-        if "photo" in message and state == "photo":
-            photo = message["photo"][-1]
-            file_id = photo["file_id"]
-            file_path_resp = requests.get(f"{API_URL}/getFile?file_id={file_id}").json()
-            file_path = file_path_resp["result"]["file_path"]
-            file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
-            photo_data = requests.get(file_url).content
-
-            photo_filename = f"{chat_id}.jpg"
-            with open(photo_filename, "wb") as f:
-                f.write(photo_data)
-
-            users[chat_id]["photo_path"] = photo_filename
-
-            # Сохранение анкеты
-            profile = users[chat_id]
-            conn = sqlite3.connect(DATABASE)
-            c = conn.cursor()
-            c.execute("REPLACE INTO profiles (chat_id, name, gender, age, city, goal, about, photo_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (
-                chat_id,
-                profile["name"],
-                profile["gender"],
-                int(profile["age"]),
-                profile["city"],
-                profile["goal"],
-                profile["about"],
-                photo_filename
-            ))
-            conn.commit()
-            conn.close()
-
-            send_message(chat_id, "Спасибо! Твоя анкета сохранена.")
-            keyboard = {
-                "inline_keyboard": [
-                    [{"text": "🔍 Поиск анкет", "callback_data": "search"}],
-                    [{"text": "✏️ Редактировать анкету", "callback_data": "edit"}],
-                    [{"text": "♻️ Начать заново", "callback_data": "restart"}]
-                ]
-            }
-            send_message(chat_id, "Выбери действие:", reply_markup=keyboard)
+        if text == "/start":
+            data["users"][chat_id] = {"state": "name"}
+            send_message(chat_id, "ÐÑÐ¸Ð²ÐµÑ! ÐÐ°Ðº ÑÐµÐ±Ñ Ð·Ð¾Ð²ÑÑ?")
+            save_data(data)
             return "OK"
 
-    if "callback_query" in update:
-        query = update["callback_query"]
-        chat_id = query["from"]["id"]
-        data = query["data"]
-
-        if data == "stats":
-            conn = sqlite3.connect(DATABASE)
-            c = conn.cursor()
-            c.execute("SELECT COUNT(*) FROM profiles")
-            total_users = c.fetchone()[0]
-            c.execute("SELECT COUNT(*) FROM likes")
-            total_likes = c.fetchone()[0]
-            conn.close()
-            msg = f"Пользователей: {total_users}\nЛайков: {total_likes}"
+        if text == "/stats" and chat_id == ADMIN_ID:
+            msg = f"ÐÐ¾Ð»ÑÐ·Ð¾Ð²Ð°ÑÐµÐ»ÐµÐ¹: {len(data['users'])}
+ÐÐ½ÐºÐµÑ: {len(data['profiles'])}"
             send_message(chat_id, msg)
             return "OK"
 
+        user = data["users"].get(chat_id, {})
+        state = user.get("state")
+
+        if state == "name":
+            user["name"] = text
+            user["state"] = "gender"
+            send_message(chat_id, "Ð£ÐºÐ°Ð¶Ð¸ Ð¿Ð¾Ð» (Ð¼ÑÐ¶ÑÐºÐ¾Ð¹/Ð¶ÐµÐ½ÑÐºÐ¸Ð¹):")
+        elif state == "gender":
+            user["gender"] = text
+            user["state"] = "age"
+            send_message(chat_id, "Ð¡ÐºÐ¾Ð»ÑÐºÐ¾ ÑÐµÐ±Ðµ Ð»ÐµÑ?")
+        elif state == "age":
+            user["age"] = text
+            user["state"] = "city"
+            send_message(chat_id, "ÐÐ· ÐºÐ°ÐºÐ¾Ð³Ð¾ ÑÑ Ð³Ð¾ÑÐ¾Ð´Ð°?")
+        elif state == "city":
+            user["city"] = text
+            user["state"] = "goal"
+            send_message(chat_id, "ÐÐ°ÐºÐ¾Ð²Ð° ÑÐµÐ»Ñ Ð·Ð½Ð°ÐºÐ¾Ð¼ÑÑÐ²Ð°?")
+        elif state == "goal":
+            user["goal"] = text
+            user["state"] = "about"
+            send_message(chat_id, "Ð Ð°ÑÑÐºÐ°Ð¶Ð¸ Ð½ÐµÐ¼Ð½Ð¾Ð³Ð¾ Ð¾ ÑÐµÐ±Ðµ:")
+        elif state == "about":
+            user["about"] = text
+            user["state"] = "photo"
+            send_message(chat_id, "Ð¢ÐµÐ¿ÐµÑÑ Ð¾ÑÐ¿ÑÐ°Ð²Ñ ÑÐ²Ð¾Ñ ÑÐ¾ÑÐ¾Ð³ÑÐ°ÑÐ¸Ñ:")
+        elif state == "photo":
+            send_message(chat_id, "ÐÐ´Ñ ÑÐ¾ÑÐ¾Ð³ÑÐ°ÑÐ¸Ñ...")
+        else:
+            send_message(chat_id, "ÐÐ°Ð¶Ð¼Ð¸ /start ÑÑÐ¾Ð±Ñ ÑÐ¾Ð·Ð´Ð°ÑÑ Ð°Ð½ÐºÐµÑÑ.")
+        data["users"][chat_id] = user
+        save_data(data)
+
+    elif "photo" in update.get("message", {}):
+        chat_id = str(update["message"]["chat"]["id"])
+        photo_id = update["message"]["photo"][-1]["file_id"]
+        user = data["users"].get(chat_id)
+
+        if user and user.get("state") == "photo":
+            profile = {
+                "id": chat_id,
+                "name": user["name"],
+                "gender": user["gender"],
+                "age": user["age"],
+                "city": user["city"],
+                "goal": user["goal"],
+                "about": user["about"],
+                "photo_id": photo_id
+            }
+            data["profiles"].append(profile)
+            user["state"] = "done"
+            send_message(chat_id, "Ð¡Ð¿Ð°ÑÐ¸Ð±Ð¾! Ð¢Ð²Ð¾Ñ Ð°Ð½ÐºÐµÑÐ° ÑÐ¾ÑÑÐ°Ð½ÐµÐ½Ð°.")
+            keyboard = {
+                "inline_keyboard": [
+                    [{"text": "ð ÐÐ¾Ð¸ÑÐº Ð°Ð½ÐºÐµÑ", "callback_data": "search"}],
+                    [{"text": "âï¸ Ð ÐµÐ´Ð°ÐºÑÐ¸ÑÐ¾Ð²Ð°ÑÑ Ð°Ð½ÐºÐµÑÑ", "callback_data": "edit"}],
+                    [{"text": "â»ï¸ ÐÐ°ÑÐ°ÑÑ Ð·Ð°Ð½Ð¾Ð²Ð¾", "callback_data": "reset"}]
+                ]
+            }
+            send_message(chat_id, "ÐÑÐ±ÐµÑÐ¸ Ð´ÐµÐ¹ÑÑÐ²Ð¸Ðµ:", reply_markup=keyboard)
+            save_data(data)
+            return "OK"
+
+    elif "callback_query" in update:
+        query = update["callback_query"]
+        chat_id = str(query["message"]["chat"]["id"])
+        data_value = query["data"]
+        user = data["users"].get(chat_id, {})
+
+        if data_value == "reset":
+            data["users"][chat_id] = {"state": "name"}
+            send_message(chat_id, "ÐÐ½ÐºÐµÑÐ° ÑÐ±ÑÐ¾ÑÐµÐ½Ð°. ÐÐ°Ðº ÑÐµÐ±Ñ Ð·Ð¾Ð²ÑÑ?")
+        elif data_value == "edit":
+            data["users"][chat_id] = {"state": "name"}
+            send_message(chat_id, "ÐÐ°Ð²Ð°Ð¹ Ð¸Ð·Ð¼ÐµÐ½Ð¸Ð¼ Ð°Ð½ÐºÐµÑÑ. ÐÐ°Ðº ÑÐµÐ±Ñ Ð·Ð¾Ð²ÑÑ?")
+        elif data_value == "search":
+            matches = [p for p in data["profiles"] if p["id"] != chat_id]
+            if matches:
+                profile = matches[0]
+                caption = f"ÐÐ¼Ñ: {profile['name']}
+ÐÐ¾Ð·ÑÐ°ÑÑ: {profile['age']}
+ÐÐ¾ÑÐ¾Ð´: {profile['city']}
+Ð ÑÐµÐ±Ðµ: {profile['about']}"
+                keyboard = {
+                    "inline_keyboard": [
+                        [{"text": "â¤ï¸", "callback_data": f"like_{profile['id']}"}],
+                        [{"text": "â­", "callback_data": "next"}]
+                    ]
+                }
+                requests.post(f"{API_URL}/sendPhoto", json={
+                    "chat_id": chat_id,
+                    "photo": profile["photo_id"],
+                    "caption": caption,
+                    "reply_markup": keyboard
+                })
+            else:
+                send_message(chat_id, "ÐÐ½ÐºÐµÑÑ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ñ.")
+        elif data_value.startswith("like_"):
+            liked_id = data_value.split("_")[1]
+            likes = data["likes"].setdefault(liked_id, [])
+            if chat_id not in likes:
+                likes.append(chat_id)
+                send_message(chat_id, "Ð¢Ñ Ð»Ð°Ð¹ÐºÐ½ÑÐ» Ð°Ð½ÐºÐµÑÑ!")
+                if chat_id in data["likes"].get(liked_id, []):
+                    send_message(chat_id, "Ð£ Ð²Ð°Ñ Ð²Ð·Ð°Ð¸Ð¼Ð½ÑÐ¹ Ð»Ð°Ð¹Ðº!")
+                    send_message(liked_id, "Ð£ Ð²Ð°Ñ Ð²Ð·Ð°Ð¸Ð¼Ð½ÑÐ¹ Ð»Ð°Ð¹Ðº!")
+        elif data_value == "next":
+            send_message(chat_id, "ÐÐ¾ÐºÐ°Ð·ÑÐ²Ð°Ñ ÑÐ»ÐµÐ´ÑÑÑÑÑ Ð°Ð½ÐºÐµÑÑ...")
+        save_data(data)
     return "OK"
 
 @app.route("/", methods=["GET"])
 def home():
     return "Bot is running"
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
