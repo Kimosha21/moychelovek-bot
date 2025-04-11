@@ -7,6 +7,7 @@ app = Flask(__name__)
 
 TOKEN = os.getenv("TOKEN")
 API_URL = f"https://api.telegram.org/bot{TOKEN}/"
+
 users = {}
 profiles = []
 likes = {}
@@ -14,16 +15,12 @@ coins = {}
 vip_users = set()
 
 def send_message(chat_id, text, reply_markup=None):
-    data = {
-        "chat_id": chat_id,
-        "text": text
-    }
+    payload = {"chat_id": chat_id, "text": text}
     if reply_markup:
-        data["reply_markup"] = json.dumps(reply_markup)
-    requests.post(API_URL + "sendMessage", json=data)
+        payload["reply_markup"] = json.dumps(reply_markup)
+    requests.post(API_URL + "sendMessage", json=payload)
 
 def send_photo(chat_id, photo_path, caption=None, reply_markup=None):
-    url = API_URL + "sendPhoto"
     with open(photo_path, "rb") as photo:
         files = {"photo": photo}
         data = {"chat_id": chat_id}
@@ -31,7 +28,7 @@ def send_photo(chat_id, photo_path, caption=None, reply_markup=None):
             data["caption"] = caption
         if reply_markup:
             data["reply_markup"] = json.dumps(reply_markup)
-        requests.post(url, data=data, files=files)
+        requests.post(API_URL + "sendPhoto", data=data, files=files)
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
@@ -75,31 +72,32 @@ def webhook():
             send_message(chat_id, "Отправь своё фото:")
         elif state == "photo" and photo:
             file_id = photo[-1]["file_id"]
-            file_path = f"{chat_id}.jpg"
             file_info = requests.get(API_URL + f"getFile?file_id={file_id}").json()
+            file_path = f"{chat_id}.jpg"
             file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info['result']['file_path']}"
-            img_data = requests.get(file_url).content
             with open(file_path, "wb") as f:
-                f.write(img_data)
+                f.write(requests.get(file_url).content)
 
-            profile = {
-                "chat_id": chat_id,
-                "name": users[chat_id]["name"],
-                "gender": users[chat_id]["gender"],
-                "age": users[chat_id]["age"],
-                "city": users[chat_id]["city"],
-                "goal": users[chat_id]["goal"],
-                "about": users[chat_id]["about"],
-                "photo_path": file_path
-            }
+            users[chat_id]["photo_path"] = file_path
+            users[chat_id]["state"] = "done"
+            profile = users[chat_id].copy()
+            profile["chat_id"] = chat_id
             profiles.append(profile)
             coins[chat_id] = 10
 
-            send_message(chat_id, "Спасибо! Твоя анкета сохранена.")
-            show_menu(chat_id)
-        elif text == "Моя анкета":
-            show_profile(chat_id)
-        return "OK"
+            caption = (
+                f"Имя: {profile['name']}\n"
+                f"Пол: {profile['gender']}\n"
+                f"Возраст: {profile['age']}\n"
+                f"Город: {profile['city']}\n"
+                f"Цель: {profile['goal']}\n"
+                f"О себе: {profile['about']}\n"
+                f"Монеты: {coins[chat_id]}\n"
+                f"VIP: {'Да' if chat_id in vip_users else 'Нет'}"
+            )
+            send_photo(chat_id, file_path, caption=caption)
+            show_main_menu(chat_id)
+            return "OK"
 
     if "callback_query" in update:
         query = update["callback_query"]
@@ -107,7 +105,7 @@ def webhook():
         data = query["data"]
 
         if data == "menu":
-            show_menu(chat_id)
+            show_main_menu(chat_id)
         elif data == "view":
             show_random_profile(chat_id)
         elif data == "like":
@@ -118,24 +116,26 @@ def webhook():
             if coins.get(chat_id, 0) >= 5:
                 coins[chat_id] -= 5
                 vip_users.add(chat_id)
-                send_message(chat_id, "Теперь ты VIP!")
+                send_message(chat_id, "Поздравляем! Вы стали VIP!")
             else:
-                send_message(chat_id, "Недостаточно монет.")
+                send_message(chat_id, "Недостаточно монет для покупки VIP.")
+        elif data == "profile":
+            show_my_profile(chat_id)
         return "OK"
 
     return "OK"
 
-def show_menu(chat_id):
+def show_main_menu(chat_id):
     keyboard = {
         "inline_keyboard": [
-            [{"text": "Моя анкета", "callback_data": "menu"}],
+            [{"text": "Моя анкета", "callback_data": "profile"}],
             [{"text": "Поиск анкет", "callback_data": "view"}],
             [{"text": "Получить VIP (5 монет)", "callback_data": "vip"}]
         ]
     }
     send_message(chat_id, "Выбери действие:", reply_markup=keyboard)
 
-def show_profile(chat_id):
+def show_my_profile(chat_id):
     for profile in profiles:
         if profile["chat_id"] == chat_id:
             caption = (
@@ -145,8 +145,8 @@ def show_profile(chat_id):
                 f"Город: {profile['city']}\n"
                 f"Цель: {profile['goal']}\n"
                 f"О себе: {profile['about']}\n"
-                f"VIP: {'Да' if chat_id in vip_users else 'Нет'}\n"
-                f"Монеты: {coins.get(chat_id, 0)}"
+                f"Монеты: {coins.get(chat_id, 0)}\n"
+                f"VIP: {'Да' if chat_id in vip_users else 'Нет'}"
             )
             send_photo(chat_id, profile["photo_path"], caption=caption)
             return
@@ -176,7 +176,7 @@ def show_random_profile(chat_id):
 def handle_like(chat_id):
     target_id = users.get(chat_id, {}).get("current")
     if not target_id:
-        send_message(chat_id, "Ошибка. Попробуй ещё раз.")
+        send_message(chat_id, "Ошибка при лайке.")
         return
     if target_id in likes and chat_id in likes[target_id]:
         send_message(chat_id, "У вас взаимная симпатия!")
@@ -186,8 +186,5 @@ def handle_like(chat_id):
     show_random_profile(chat_id)
 
 @app.route("/", methods=["GET"])
-def home():
+def index():
     return "Bot is running"
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
