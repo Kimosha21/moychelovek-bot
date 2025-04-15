@@ -5,7 +5,7 @@ import json
 import os
 import datetime
 
-TOKEN = TOKEN = '7559665369:AAEgaC1ckHucHDKYr9zyiEcjnDMQGIkME8M'
+TOKEN = '7559665369:AAEXLReINkB0r87FsvfHWmnHw7pwCgLUUi0'
 CHANNEL_USERNAME = '@moychelovek'
 DATA_FILE = 'moychelovek_data_20250415.json'
 
