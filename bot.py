@@ -36,7 +36,7 @@ def is_user_subscribed(user_id):
 
 @app.route('/', methods=['POST'])
 def webhook():
-    update = telebot.types.Update.de_json(request.get_json(force=True), bot)
+    update = telebot.types.Update.de_json(request.get_json(force=True))
     if update.message:
         handle_message(update.message)
     elif update.callback_query:
