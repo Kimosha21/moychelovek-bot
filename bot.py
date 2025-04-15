@@ -6,7 +6,7 @@ import os
 import datetime
 
 TOKEN = '7559665369:AAEXLReINkB0r87FsvfHWmnHw7pwCgLUUi0'
-CHANNEL_USERNAME = '@moychelovek'
+CHANNEL_USERNAME = '@moychelovek61'
 DATA_FILE = 'moychelovek_data.json'
 
 bot = telebot.TeleBot(TOKEN)
